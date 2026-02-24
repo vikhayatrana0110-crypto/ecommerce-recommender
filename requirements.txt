@@ -1,0 +1,9 @@
+pandas
+numpy
+scikit-learn
+implicit
+scipy
+tqdm
+pyyaml
+matplotlib
+pyarrow
