@@ -5,7 +5,7 @@ This is an end-to-end collaborative filtering recommender system designed for th
 
 ---
 
-## 📌 Problem Statement
+## Problem Statement
 
 Build a scalable recommendation system that suggests top-N products to users based on implicit interaction data (views/purchases), and benchmark it against a popularity baseline.
 
@@ -13,7 +13,7 @@ The objective is to evaluate whether matrix factorization (ALS) improves ranking
 
 ---
 
-## ✨ Features & Highlights
+## Features & Highlights
 
 - **Built End-to-End Collaborative Filtering Pipeline**: Clean separation of data loading, preprocessing, model training, and evaluation.
 - **Fast Chunked Loading**: Memory-efficient streaming of multi-gigabyte `.gz` compressed datasets using pandas chunking.
@@ -25,7 +25,7 @@ The objective is to evaluate whether matrix factorization (ALS) improves ranking
 
 ---
 
-## 📊 Dataset & Preprocessing
+## Dataset & Preprocessing
 
 - Initial reviews: 50,000
 - After filtering active users & popular items
@@ -48,7 +48,7 @@ The objective is to evaluate whether matrix factorization (ALS) improves ranking
 
 ---
 
-## 🏗 Project Architecture
+## Project Architecture
 
 ```text
 ecommerce-recommender/
@@ -81,7 +81,7 @@ ecommerce-recommender/
 
 ---
 
-## 🛠 Installation & Setup
+## Installation & Setup
 
 1. **Activate the Virtual Environment**:
    ```bash
@@ -94,7 +94,7 @@ ecommerce-recommender/
 
 ---
 
-## 🚀 Running the Project
+## Running the Project
 
 ### 1. Run Model Training & Evaluation
 To parse raw datasets, pre-process matrices, fit the ALS model, evaluate baseline metrics, and serialize artifacts to the `data/` folder, run:
@@ -116,7 +116,7 @@ python -m pytest
 
 ---
 
-## ⚙ Configuration Settings
+## Configuration Settings
 All paths and hyperparameters can be tweaked dynamically in [config.yaml](file:///d:/%231%20PROJECT/ecommerce-recommender/src/config/config.yaml):
 - **Filtering thresholds** (e.g., minimum user/item reviews)
 - **Model parameters** (factors, regularization, iterations, confidence alpha)
@@ -125,7 +125,7 @@ All paths and hyperparameters can be tweaked dynamically in [config.yaml](file:/
 
 ---
 
-## 📈 Evaluation (Top-10 Ranking)
+## Evaluation (Top-10 Ranking)
 
 | Model | Precision@10 | Recall@10 |
 |-------|--------------|-----------|
@@ -134,7 +134,7 @@ All paths and hyperparameters can be tweaked dynamically in [config.yaml](file:/
 
 ---
 
-## 🔎 Analysis & Insights
+## Analysis & Insights
 
 - Dataset is extremely sparse (~1.8% density).
 - Majority of users have only 1 interaction.
