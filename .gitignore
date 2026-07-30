@@ -1,20 +1,44 @@
-#virtual environment
+# Virtual environment
 venv/
 .env/
 .venv/
+env/
+ENV/
 
+# Python byte code
 __pycache__/
 */__pycache__/
 *.pyc
 *.pyo
 *.pyd
 
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Streamlit config & secrets
+.streamlit/secrets.toml
+
+# Data directory
 data/raw/
 *.gz
 *.json
 *.csv
+*.pkl
+*.pickle
+*.joblib
 
+# Logs
+*.log
+
+# OS files
 .DS_Store
 Thumbs.db
 
+# IDEs
 .vscode/
+.idea/

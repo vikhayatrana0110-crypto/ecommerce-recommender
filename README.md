@@ -1,5 +1,9 @@
 # E-Commerce Recommendation System  
-### Implicit Collaborative Filtering using ALS
+### Implicit Collaborative Filtering using ALS with Streamlit Dashboard
+
+This is an end-to-end collaborative filtering recommender system designed for the Amazon Electronics reviews dataset. It features dynamic configuration, optimized data ingestion, vectorized matrix operations, implicit ALS training, model persistence, evaluation metrics, unit testing, and a Streamlit UI dashboard.
+
+---
 
 ## 📌 Problem Statement
 
@@ -9,14 +13,15 @@ The objective is to evaluate whether matrix factorization (ALS) improves ranking
 
 ---
 
-##  Key Highlights
+## ✨ Features & Highlights
 
-- Built end-to-end collaborative filtering pipeline
-- Implemented **Implicit ALS** using sparse matrix factorization
-- Designed baseline model for performance comparison
-- Evaluated using ranking metrics (Precision@10, Recall@10)
-- Handled high sparsity interaction matrix (~1.8% density)
-- Structured modular ML project with clean separation of concerns
+- **Built End-to-End Collaborative Filtering Pipeline**: Clean separation of data loading, preprocessing, model training, and evaluation.
+- **Fast Chunked Loading**: Memory-efficient streaming of multi-gigabyte `.gz` compressed datasets using pandas chunking.
+- **Vectorized Preprocessing**: Speeds up CSR interaction matrix generation by mapping indices in vector space (avoiding slow python loops).
+- **Implicit ALS Matrix Factorization**: Latent factor model using the `implicit` library.
+- **Pickled Model Persistence**: Serializes trained Alternating Least Squares (ALS) models and dictionary mappings for instant serving.
+- **Streamlit Interactive UI**: Search users, view purchase histories, display recommendations, and handle new/unknown user IDs via a built-in popularity-based **Cold Start** fallback mechanism.
+- **Comprehensive Unit Testing**: Automated tests via `pytest` for pipeline transformations and train-test splits.
 
 ---
 
@@ -32,32 +37,91 @@ The objective is to evaluate whether matrix factorization (ALS) improves ranking
 | Items | 84 |
 | Matrix Shape | (668, 84) |
 | Non-zero interactions | 1,384 |
-| Density | 0.0185 |
+| Density | 0.0185 (1.85%) |
 | Avg interactions/user | 1.55 |
 
 ### Processing Steps
-- Removed inactive users
-- Removed low-frequency items
-- Built sparse CSR interaction matrix
+- Remove inactive users (e.g., `< 10` reviews)
+- Remove low-frequency items (e.g., `< 10` reviews)
+- Build sparse CSR interaction matrix
 - Train/Test split on implicit feedback
 
 ---
 
-##  Models Implemented
+## 🏗 Project Architecture
 
-### 1️⃣ Popularity Baseline
-- Recommends globally most interacted items
-- Serves as benchmark for collaborative filtering
+```text
+ecommerce-recommender/
+│
+├── src/
+│   ├── config/
+│   │   └── config.yaml           # Hyperparameters and file path configurations
+│   ├── data/
+│   │   ├── load_data.py          # Data ingestion from compressed source files
+│   │   └── preprocess.py         # Vectorized matrix preparation and filtering
+│   └── utils/
+│       └── helpers.py            # Utility functions for YAML config and pickle serialization
+│
+├── tests/
+│   └── test_recommender.py       # Unit tests for verification
+│
+├── data/                         # Locally stored data files (Ignored from Git)
+│   ├── raw/
+│   │   ├── Electronics.jsonl.gz
+│   │   └── meta_Electronics.jsonl.gz
+│   ├── model.pkl
+│   ├── user_map.pkl
+│   └── item_map.pkl
+│
+├── app.py                        # Streamlit Interactive Dashboard UI
+├── main.py                       # Orchestrator script for training and evaluation
+├── requirements.txt              # Project package dependencies
+└── README.md                     # Documentation
+```
 
-### 2️⃣ Implicit ALS (Alternating Least Squares)
-- Library: `implicit`
-- Confidence-weighted matrix factorization
-- 64 latent factors
-- Trained on sparse matrix using optimized linear algebra backend
+---
 
-Learned Representations:
-- User factors: (668 × 64)
-- Item factors: (84 × 64)
+## 🛠 Installation & Setup
+
+1. **Activate the Virtual Environment**:
+   ```bash
+   .\venv\Scripts\activate
+   ```
+2. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+---
+
+## 🚀 Running the Project
+
+### 1. Run Model Training & Evaluation
+To parse raw datasets, pre-process matrices, fit the ALS model, evaluate baseline metrics, and serialize artifacts to the `data/` folder, run:
+```bash
+python main.py
+```
+
+### 2. Launch the Streamlit Dashboard
+To launch the interactive web interface, run:
+```bash
+streamlit run app.py
+```
+
+### 3. Run Unit Tests
+To run verification tests:
+```bash
+python -m pytest
+```
+
+---
+
+## ⚙ Configuration Settings
+All paths and hyperparameters can be tweaked dynamically in [config.yaml](file:///d:/%231%20PROJECT/ecommerce-recommender/src/config/config.yaml):
+- **Filtering thresholds** (e.g., minimum user/item reviews)
+- **Model parameters** (factors, regularization, iterations, confidence alpha)
+- **Record caps** (e.g., number of review records to read)
+- **File paths** (source datasets and serialized model files)
 
 ---
 
@@ -65,7 +129,7 @@ Learned Representations:
 
 | Model | Precision@10 | Recall@10 |
 |-------|--------------|-----------|
-| ALS | **0.0206** | 0.1657 |
+| **ALS** | **0.0206** | 0.1657 |
 | Popularity | 0.0250 | **0.2500** |
 
 ---
@@ -77,21 +141,6 @@ Learned Representations:
 - Popularity baseline outperformed ALS due to:
   - Limited personalization signal
   - Insufficient user interaction history
-- Demonstrates importance of data density in collaborative filtering systems.
+- Demonstrates the critical importance of data density in collaborative filtering systems.
 
 This mirrors real-world recommender challenges where model complexity does not guarantee better ranking performance under sparse conditions.
-
----
-
-## 🏗 Project Architecture
-ecommerce-recommender/
-│
-├── src/
-│ ├── data_loader.py
-│ ├── preprocessing.py
-│ ├── als_model.py
-│ ├── evaluation.py
-│
-├── main.py
-├── requirements.txt
-└── README.md

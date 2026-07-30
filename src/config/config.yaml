@@ -1,0 +1,19 @@
+data:
+  reviews_path: "data/raw/Electronics.jsonl.gz"
+  metadata_path: "data/raw/meta_Electronics.jsonl.gz"
+  max_records: 100000
+
+filtering:
+  min_reviews_user: 10
+  min_reviews_item: 10
+
+als:
+  factors: 64
+  regularization: 0.01
+  iterations: 25
+  alpha: 40
+
+output:
+  model_path: "data/model.pkl"
+  user_map_path: "data/user_map.pkl"
+  item_map_path: "data/item_map.pkl"

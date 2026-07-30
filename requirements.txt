@@ -7,3 +7,5 @@ tqdm
 pyyaml
 matplotlib
 pyarrow
+streamlit
+pytest
