@@ -1,139 +1,185 @@
-import streamlit as st
-import numpy as np
-import pandas as pd
-import os
-from implicit.als import AlternatingLeastSquares
-from src.utils.helpers import load_config, load_pickle
-from src.data.load_data import load_metadata, load_reviews
-from src.data.preprocess import clean_reviews, filter_active_users, filter_popular_items, create_interaction_matrix
+"""Streamlit dashboard for the ALS recommender.
 
-# Page Configuration
-st.set_page_config(page_title="E-commerce Recommender Dashboard", layout="wide")
-st.title("E-commerce Product Recommender System")
+Reads the artifacts written by `main.py`; it never retrains or re-reads the raw
+archives.
+"""
+import streamlit as st
+
+from src.data.preprocess import create_interaction_matrix
+from src.models.als import ALSRecommender
+from src.models.content import ContentRecommender, cold_start_recommend
+from src.models.popularity import PopularityRecommender
+from src.pipeline import build_interactions, build_metadata, title_lookup
+from src.utils.helpers import load_config, load_pickle, resolve_path
+
+st.set_page_config(page_title="E-commerce Recommender", layout="wide")
+st.title("E-commerce Product Recommender")
+
 
 @st.cache_resource
 def get_config():
     return load_config()
 
+
 cfg = get_config()
 
-# Load reviews to show past interactions
-@st.cache_data
-def get_reviews():
-    reviews = load_reviews(cfg['data']['reviews_path'], cfg['data']['max_records'])
-    reviews = clean_reviews(reviews)
-    reviews = filter_active_users(reviews, cfg['filtering']['min_reviews_user'])
-    reviews = filter_popular_items(reviews, cfg['filtering']['min_reviews_item'])
-    return reviews
 
-reviews_df = get_reviews()
-
-# Load metadata helper
-@st.cache_data
-def get_metadata(active_items):
-    metadata = load_metadata(cfg['data']['metadata_path'], filter_items=active_items)
-    return metadata.set_index('item_id')['title'].to_dict()
-
-# Use tuple for streamlit caching hashability
-meta_dict = get_metadata(tuple(reviews_df['item_id'].unique()))
-
-# Helper to check if model & maps exist
-model_exists = (
-    os.path.exists(cfg['output']['model_path']) and
-    os.path.exists(cfg['output']['user_map_path']) and
-    os.path.exists(cfg['output']['item_map_path'])
-)
-
-if not model_exists:
-    st.warning("No trained model found on disk. Please train the model first by running `main.py` or clicking the retrain button below.")
-
-# Load Model and Mappings
 @st.cache_resource
-def load_model_and_maps():
-    if model_exists:
-        model = load_pickle(cfg['output']['model_path'])
-        user_map = load_pickle(cfg['output']['user_map_path'])
-        item_map = load_pickle(cfg['output']['item_map_path'])
-        return model, user_map, item_map
-    return None, None, None
+def load_artifacts():
+    """Loads the trained model and the mappings it was trained against."""
+    out = cfg["output"]
+    paths = [out["model_path"], out["user_map_path"], out["item_map_path"]]
+    if not all(resolve_path(p).exists() for p in paths):
+        return None
 
-model, user_map, item_map = load_model_and_maps()
+    return {
+        "model": ALSRecommender.load(out["model_path"]),
+        "user_map": load_pickle(out["user_map_path"]),
+        "item_map": load_pickle(out["item_map_path"]),
+    }
 
-# Cold Start / Fallback Recommender
-def get_cold_start_recommendations(train_matrix, k=10):
-    item_popularity = np.array(train_matrix.sum(axis=0)).flatten()
-    return np.argsort(-item_popularity)[:k]
 
-# Retrieve mappings
-if user_map and item_map:
-    inv_user_map = {v: k for k, v in user_map.items()}
-    inv_item_map = {v: k for k, v in item_map.items()}
-    # Re-create interaction matrix for lookup
-    interaction_matrix, _, _ = create_interaction_matrix(reviews_df)
-else:
-    inv_user_map, inv_item_map, interaction_matrix = {}, {}, None
+@st.cache_data
+def load_data(_user_map, _item_map):
+    """Rebuilds the interaction matrix inside the trained index space.
 
-col1, col2 = st.columns([1, 2])
+    Passing the persisted maps is essential: the model's factors are only
+    meaningful against the mapping it was trained with. Rebuilding with fresh
+    maps would silently recommend the wrong products.
+    """
+    reviews = build_interactions(cfg)
+    matrix, _, _ = create_interaction_matrix(reviews, user_map=_user_map, item_map=_item_map)
+    metadata = build_metadata(cfg, _item_map.keys())
+    return matrix, metadata
 
-with col1:
-    st.subheader("Search User Recommendations")
-    
-    # Text input or selectbox for user_id
-    user_list = list(user_map.keys()) if user_map else []
-    selected_user = st.text_input("Enter User ID:", value=user_list[0] if user_list else "")
-    
-    num_recs = st.slider("Number of Recommendations", 5, 20, 10)
-    
-    if st.button("Generate Recommendations"):
-        if selected_user and selected_user in user_map:
-            user_idx = user_map[selected_user]
-            user_items = interaction_matrix[user_idx]
-            
-            # 1. Show Past Purchases
-            st.markdown("### Past Purchases")
-            past_indices = user_items.indices
-            for idx in past_indices:
-                asin = inv_item_map[idx]
-                st.write(f"- **{meta_dict.get(asin, 'Unknown Product')}** (`{asin}`)")
-                
-            # 2. Get recommendations
-            recs, _ = model.recommend(
-                user_idx, 
-                user_items=user_items, 
-                N=num_recs, 
-                filter_already_liked_items=True
+
+artifacts = load_artifacts()
+if artifacts is None:
+    st.error(
+        "No trained model found. Run `python main.py` first to train the model "
+        "and write the artifacts into `data/`."
+    )
+    st.stop()
+
+model = artifacts["model"]
+user_map, item_map = artifacts["user_map"], artifacts["item_map"]
+inv_item_map = {v: k for k, v in item_map.items()}
+
+with st.spinner("Loading interactions and product metadata..."):
+    interaction_matrix, metadata = load_data(user_map, item_map)
+    titles = title_lookup(metadata)
+
+
+@st.cache_resource
+def build_side_models(_matrix, _metadata, _item_map):
+    popularity = PopularityRecommender().fit(_matrix)
+    content = ContentRecommender().fit(_metadata, _item_map)
+    return popularity, content
+
+
+popularity, content = build_side_models(interaction_matrix, metadata, item_map)
+
+
+def product_name(item_index):
+    asin = inv_item_map.get(int(item_index), f"index_{item_index}")
+    return titles.get(asin, "Unknown Product"), asin
+
+
+def render_products(indices, empty_message="Nothing to show."):
+    if len(indices) == 0:
+        st.info(empty_message)
+        return
+    for rank, item_index in enumerate(indices, start=1):
+        title, asin = product_name(item_index)
+        with st.container(border=True):
+            st.markdown(f"**{rank}. {title}**")
+            st.caption(f"ASIN: {asin}")
+
+
+# ---------------------------------------------------------------- sidebar
+with st.sidebar:
+    st.header("Model")
+    st.metric("Users", f"{len(user_map):,}")
+    st.metric("Items", f"{len(item_map):,}")
+    st.metric("Interactions", f"{interaction_matrix.nnz:,}")
+    st.caption(
+        f"Metadata titles for {len(titles):,} of {len(item_map):,} items "
+        "(the raw metadata archive is truncated)."
+    )
+
+# ---------------------------------------------------------------- controls
+left, right = st.columns([1, 2])
+
+with left:
+    st.subheader("Find recommendations")
+
+    user_ids = list(user_map)
+    known_user = st.selectbox(
+        "Known user", options=user_ids, index=0,
+        help="Users the model was trained on.",
+    )
+    custom_user = st.text_input(
+        "...or type any user ID",
+        placeholder="Unknown IDs fall back to cold start",
+    )
+    selected_user = custom_user.strip() or known_user
+    num_recs = st.slider("Number of recommendations", 5, 20, 10)
+
+    if st.button("Generate", type="primary"):
+        if selected_user in user_map:
+            user_index = user_map[selected_user]
+            user_items = interaction_matrix[user_index]
+            recs = model.recommend(user_index, user_items, n=num_recs)
+            st.session_state.update(
+                recommendations=list(recs), cold_start=False,
+                history=list(user_items.indices), user=selected_user,
             )
-            
-            # Display recommendations
-            st.session_state['recommendations'] = recs
-            st.session_state['cold_start'] = False
         else:
-            st.info("User not found in database. Applying Cold Start (Popularity Fallback) model:")
-            # Use popularity baseline fallback
-            recs = get_cold_start_recommendations(interaction_matrix, k=num_recs)
-            st.session_state['recommendations'] = recs
-            st.session_state['cold_start'] = True
-
-with col2:
-    st.subheader("Recommendations")
-    if 'recommendations' in st.session_state:
-        recs = st.session_state['recommendations']
-        is_cold = st.session_state.get('cold_start', False)
-        
-        if is_cold:
-            st.caption("Showing globally popular products (Cold Start Fallback)")
-            
-        for i, item_idx in enumerate(recs):
-            asin = inv_item_map.get(item_idx, f"Index_{item_idx}")
-            title = meta_dict.get(asin, "Unknown Product")
-            st.markdown(
-                f"""
-                <div style="padding:10px; border-radius:5px; background-color:#1e293b; margin-bottom:10px; border-left: 5px solid #3b82f6;">
-                    <strong>{i+1}. {title}</strong><br/>
-                    <small style="color:#94a3b8;">ASIN: {asin}</small>
-                </div>
-                """,
-                unsafe_allow_html=True
+            recs = cold_start_recommend(content, popularity, [], n=num_recs)
+            st.session_state.update(
+                recommendations=list(recs), cold_start=True,
+                history=[], user=selected_user,
             )
+
+    if st.session_state.get("history"):
+        st.markdown("#### Purchase history")
+        render_products(st.session_state["history"])
+
+# ---------------------------------------------------------------- results
+with right:
+    if "recommendations" not in st.session_state:
+        st.info("Pick a user on the left and press **Generate**.")
     else:
-        st.write("Submit a user query on the left to see recommendations.")
+        user = st.session_state["user"]
+        if st.session_state["cold_start"]:
+            st.subheader("Recommendations (cold start)")
+            st.warning(
+                f"`{user}` is not in the training data, so there are no learned "
+                "preferences to personalise from. Falling back to globally "
+                "popular products."
+            )
+        else:
+            st.subheader(f"Recommendations for `{user}`")
+        render_products(st.session_state["recommendations"])
+
+st.divider()
+
+# ---------------------------------------------------------------- similar items
+st.subheader("Find similar products")
+st.caption("Content-based lookalikes from product titles and categories.")
+
+if not content.available:
+    st.info("No product metadata available, so content similarity is disabled.")
+else:
+    # Rank by popularity so the picker opens on products people actually bought.
+    known_items = [i for i in popularity.ranking if titles.get(inv_item_map.get(int(i)))]
+    options = [int(i) for i in known_items[:2000]]
+
+    choice = st.selectbox(
+        "Product",
+        options=options,
+        format_func=lambda i: titles.get(inv_item_map[i], inv_item_map[i])[:110],
+    )
+    if choice is not None:
+        similar = content.similar_items(int(choice), n=6)
+        render_products(similar, "No similar products found.")
