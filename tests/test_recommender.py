@@ -53,3 +53,12 @@ def test_train_test_split():
     # Assert original values are retained in either train or test
     reconstructed = train + test
     assert np.allclose(reconstructed.toarray(), interaction_matrix.toarray())
+
+
+def test_filter_popular_items(sample_reviews_df):
+    cleaned = clean_reviews(sample_reviews_df)
+    # After cleaning: I1 has 2 reviews (U1, U2), I2 has 2 (U1, U2).
+    filtered = filter_popular_items(cleaned, min_reviews=2)
+    assert set(filtered["item_id"].unique()) == {"I1", "I2"}
+    # Raising the threshold above every item's count empties the frame.
+    assert filter_popular_items(cleaned, min_reviews=5).empty
