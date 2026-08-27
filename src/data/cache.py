@@ -14,6 +14,20 @@ def cache_key(*parts):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
+def source_fingerprint(path):
+    """Identifies a source archive by size and mtime.
+
+    Config values alone are not enough: replacing an archive on disk leaves
+    every config value unchanged, so a cache keyed only on config would serve a
+    frame built from the previous file.
+    """
+    resolved = resolve_path(path)
+    if not resolved.exists():
+        return (str(path), None, None)
+    stat = resolved.stat()
+    return (str(path), stat.st_size, int(stat.st_mtime))
+
+
 def cached_frame(name, builder, cache_dir, key_parts, enabled=True):
     """Returns a DataFrame from the Parquet cache, building and storing it on miss.
 

@@ -1,7 +1,7 @@
 """Shared data pipeline used by both the training script and the dashboard."""
 from scipy.sparse import load_npz, save_npz
 
-from src.data.cache import cached_frame
+from src.data.cache import cached_frame, source_fingerprint
 from src.data.load_data import load_metadata, load_reviews
 from src.data.preprocess import (
     binarize_ratings,
@@ -25,7 +25,7 @@ def build_interactions(cfg, use_cache=True):
     data_cfg, filt_cfg = cfg["data"], cfg["filtering"]
 
     key_parts = [
-        data_cfg["reviews_path"], data_cfg["max_records"],
+        source_fingerprint(data_cfg["reviews_path"]), data_cfg["max_records"],
         filt_cfg["min_reviews_user"], filt_cfg["min_reviews_item"],
         filt_cfg["max_filter_passes"], filt_cfg["binarize"],
         filt_cfg.get("positive_threshold"),
@@ -63,7 +63,10 @@ def build_metadata(cfg, item_ids, use_cache=True):
     """Loads titles/categories for the active items only, cached as Parquet."""
     data_cfg = cfg["data"]
     item_ids = sorted(map(str, item_ids))
-    key_parts = [data_cfg["metadata_path"], len(item_ids), item_ids[:50], item_ids[-50:]]
+    key_parts = [
+        source_fingerprint(data_cfg["metadata_path"]),
+        len(item_ids), item_ids[:50], item_ids[-50:],
+    ]
 
     def builder():
         return load_metadata(
