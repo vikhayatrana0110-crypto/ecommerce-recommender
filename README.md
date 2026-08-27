@@ -87,7 +87,7 @@ Place the raw archives at `data/raw/Electronics.jsonl.gz` and
 ```bash
 python main.py            # train, evaluate, write artifacts to data/
 streamlit run app.py      # interactive dashboard
-pytest                    # 79 tests
+pytest                    # 81 tests
 ```
 
 `main.py` takes roughly **1 min 45 s** on a cold cache (streaming and filtering
@@ -141,7 +141,7 @@ ecommerce-recommender/
 │   │   └── evaluate.py         # batched evaluation
 │   ├── pipeline.py             # shared data preparation
 │   └── utils/helpers.py        # config, paths, logging, plotting
-├── tests/                      # 79 tests
+├── tests/                      # 81 tests
 ├── app.py                      # Streamlit dashboard
 └── main.py                     # train + evaluate + persist
 ```
@@ -204,7 +204,7 @@ title coverage**; no code change is needed.
 pytest
 ```
 
-79 tests covering ranking metrics against hand-computed values, split
+81 tests covering ranking metrics against hand-computed values, split
 determinism and leakage, k-core convergence, duplicate-interaction handling,
 index-space alignment between training and serving, loader behaviour on
 truncated and malformed archives, and model round-trips.
