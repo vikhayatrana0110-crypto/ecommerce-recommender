@@ -1,11 +1,13 @@
-pandas
-numpy
-scikit-learn
-implicit
-scipy
-tqdm
-pyyaml
-matplotlib
-pyarrow
-streamlit
-pytest
+# Pinned for Python 3.12 on macOS (Apple Silicon).
+# `implicit` needs OpenMP on macOS: brew install libomp
+pandas>=2.3,<3
+numpy>=2.0,<3
+scikit-learn>=1.7,<2
+scipy>=1.15,<2
+implicit>=0.7.3,<0.8
+pyarrow>=21,<26
+pyyaml>=6.0,<7
+matplotlib>=3.10,<4
+tqdm>=4.67,<5
+streamlit>=1.50,<2
+pytest>=8.0,<10

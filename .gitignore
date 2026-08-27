@@ -1,4 +1,5 @@
 # Virtual environment
+.venv/
 venv/
 .env/
 .venv/
@@ -31,6 +32,7 @@ data/raw/
 *.pkl
 *.pickle
 *.joblib
+*.npz
 
 # Logs
 *.log
@@ -41,4 +43,7 @@ Thumbs.db
 
 # IDEs
 .vscode/
-.idea/
+.idea/
+# Processed data cache & generated reports
+data/processed/
+reports/
