@@ -1,47 +1,58 @@
-# Incomplete Features and Shortcomings
+# Future Work
 
-Below is a detailed list of features left incomplete, architectural gaps, and general shortcomings identified in the current state of the E-commerce Recommender project.
+The gaps listed in the original version of this file are closed. What follows is
+what a next iteration would tackle, in rough order of value.
 
----
+## Closed
 
-## 1. Unused Metadata & Lack of Content-Based Recommenders
-- **Incomplete**: Although `load_metadata` exists in `src/data/load_data.py` and is called in `main.py`, the metadata DataFrame is never used.
-- **Shortcoming**: 
-  - The recommendations are solely collaborative (using ratings/interactions).
-  - There is no fallback or hybrid model using metadata titles and categories to solve the **cold-start problem** for new users or items.
-  - The final outputs cannot display human-readable titles (e.g. "Bose Headphones") and only reference internal mapped integer IDs.
+| Item | Resolution |
+|---|---|
+| Unused metadata; no content-based model | `src/models/content.py` — TF-IDF item-item similarity, cold-start profiles, "similar products" in the dashboard |
+| Empty config; hardcoded hyperparameters | `src/config/config.yaml` drives every threshold, path and hyperparameter |
+| Empty helpers module | `src/utils/helpers.py` — config, path resolution, pickling, logging, plotting |
+| Inconsistent evaluation | All models scored on an identical user set via `src/eval/evaluate.py` |
+| Missing NDCG / MAP | `src/eval/metrics.py`, verified against hand-computed values |
+| Slow ingestion; `.iterrows()` | Line-streaming readers; vectorized index mapping; Parquet cache |
+| No model persistence | ALS model, maps and matrix persisted; the app never retrains |
+| No application interface | Streamlit dashboard with cold start and similar-products |
+| No documentation or tests | README rewritten from real runs; 78 tests |
+| Non-deterministic results | One `seed`; two runs produce byte-identical metrics |
+| Sparsity mis-diagnosis | Iterative k-core filtering: 1.55 → 10.65 interactions per user |
 
-## 2. Empty Configuration and Hardcoded Parameters
-- **Incomplete**: `src/config/config.yaml` is empty.
-- **Shortcoming**: 
-  - Hyperparameters (`factors=64`, `regularization=0.01`, `iterations=25`, `alpha=40`), minimum thresholds (`min_reviews=10`), file paths, and maximum records (`50000`) are all hardcoded inside `main.py`.
-  - There is no YAML parser to load configurations dynamically.
+## Open
 
-## 3. Empty Helpers Module
-- **Incomplete**: `src/utils/helpers.py` is empty.
-- **Shortcoming**: Common auxiliary tasks (such as logging, plotting training curves, mapping IDs to ASINs/Titles, and model serialization) have no helper functions defined.
+### 1. Re-download the raw archives
+Both are truncated (see README > Data integrity). Only 36,311 of 51,064 items
+resolve a title, so the dashboard shows "Unknown Product" for ~29% of results
+and the content model has nothing to work with for those items. **This is the
+single highest-value fix and needs no code change.**
 
-## 4. Evaluation Inconsistencies & Limitations
-- **Shortcoming**:
-  - In `main.py`, ALS is evaluated using a subset of users (`max_users=2000`) for performance reasons, whereas the Popularity Baseline is evaluated over the entire dataset. This leads to inconsistent and statistically skewed comparisons.
-  - Evaluation metrics are limited to basic Precision@K and Recall@K. Normalized Discounted Cumulative Gain (NDCG) and Mean Average Precision (MAP) are missing.
+### 2. Hyperparameter search
+`factors`, `regularization` and `alpha` are reasonable defaults, never tuned. A
+sweep with a proper validation split would likely move the ALS numbers
+meaningfully.
 
-## 5. Scalability & Performance Issues
-- **Shortcoming**:
-  - The dataset files are extremely large (Reviews: 6.47 GB, Metadata: 1.31 GB). Reading them line-by-line using standard Python gzip + JSON parsing is slow and memory-intensive.
-  - The current pipeline caps records at `50,000` to run quickly, meaning the model trains on a tiny fraction of the actual data.
-  - Using a sparse representation `lil_matrix` during building and converting it to `csr_matrix` is correct, but iterating over the DataFrame rows with `.iterrows()` is highly inefficient for large datasets.
+### 3. Scale past 3M reviews
+The clean prefix holds ~36M reviews; the pipeline currently reads 3M. Going
+further needs out-of-core matrix construction — the interactions frame is
+already the memory ceiling.
 
-## 6. Lack of Model Persistence (Save/Load)
-- **Incomplete**: There is no functionality to serialize/save the trained ALS model or the user/item ID mapping dictionaries (`user_map`, `item_map`) to disk.
-- **Shortcoming**: Every time the system runs, it must reload the raw data, clean it, and retrain the model from scratch to make recommendations.
+### 4. Evaluate the cold-start path
+Hybrid is identical to ALS under leave-last-out because that protocol never
+produces a cold user. Measuring it needs a held-out-user protocol where entire
+users are withheld from training.
 
-## 7. No Application Interface (API or CLI)
-- **Incomplete**: The helper function `recommend_items` is defined in `main.py` but never called or exposed to the user.
-- **Shortcoming**: There is no command-line interface or API (e.g., Flask/FastAPI) to query the recommender system for a given user ID.
+### 5. Richer models
+BPR or LightFM (which folds item features directly into factorization) would be
+a natural comparison, and would make the content signal part of the model rather
+than only a fallback.
 
-## 8. Missing Documentation and Tests
-- **Incomplete**: `README.md` is empty.
-- **Shortcoming**:
-  - No instructions on how to set up, configure, run, or verify the project.
-  - Complete lack of unit, integration, or regression tests to verify data pipelines, preprocessing rules, or recommendation algorithms.
+### 6. Serving interface
+Deliberately out of scope for this iteration: no CLI or REST API. The Streamlit
+dashboard is the only interface. A FastAPI service loading the pickled artifacts
+would be straightforward if one is ever needed.
+
+### 7. Cross-platform support
+macOS only. The path handling is already CWD- and separator-independent, so a
+Windows/Linux pass would mostly be dependency pinning and CI — but nothing is
+verified off macOS today.

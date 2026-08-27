@@ -1,25 +1,55 @@
 # Project Context: E-commerce Recommender System
 
-This project is a collaborative filtering recommender system designed for e-commerce, specifically using the Amazon Electronics reviews dataset. It leverages implicit feedback modeling with Alternating Least Squares (ALS) and compares it against a popularity-based baseline.
+An implicit-feedback collaborative filtering recommender for the Amazon Reviews
+2023 Electronics dataset. Trains ALS matrix factorization, benchmarks it against
+a popularity baseline and a hybrid cold-start model, and serves results through
+a Streamlit dashboard.
 
-## Project Structure
+## Entry points
 
-- **`main.py`**: The entry point of the project. It orchestrates the loading, preprocessing, split, training, evaluation, and logging of statistics.
-- **`requirements.txt`**: Project dependencies, including `pandas`, `numpy`, `scikit-learn`, `implicit`, `scipy`, `tqdm`, `pyyaml`, `matplotlib`, and `pyarrow`.
-- **`src/`**: Source folder.
-  - **`data/`**:
-    - [load_data.py](file:///d:/%231%20PROJECT/ecommerce-recommender/src/data/load_data.py): Handles streaming, reading, and loading raw review and metadata `.jsonl.gz` datasets into Pandas DataFrames.
-    - [preprocess.py](file:///d:/%231%20PROJECT/ecommerce-recommender/src/data/preprocess.py): Functions for cleaning reviews, filtering inactive users, filtering unpopular items, and building sparse user-item interaction matrices.
-  - **`config/`**:
-    - [config.yaml](file:///d:/%231%20PROJECT/ecommerce-recommender/src/config/config.yaml): Directory for configuration parameters (currently empty).
-  - **`utils/`**:
-    - [helpers.py](file:///d:/%231%20PROJECT/ecommerce-recommender/src/utils/helpers.py): Helper utilities (currently empty).
-- **`data/raw/`**: Contains the raw datasets (not tracked by Git due to size):
-  - `Electronics.jsonl.gz` (Reviews dataset)
-  - `meta_Electronics.jsonl.gz` (Metadata dataset)
+- **`main.py`** — trains, evaluates and persists. Also defines `HybridRecommender`
+  (ALS for warm users, content/popularity for cold ones).
+- **`app.py`** — Streamlit dashboard. Loads persisted artifacts; never retrains.
+- **`src/pipeline.py`** — shared data preparation used by both, so the app and the
+  trainer cannot drift apart.
 
-## Core Technologies
-1. **Python 3.x**
-2. **Implicit**: Used to train the Alternating Least Squares (ALS) model.
-3. **SciPy**: For creating and handling sparse matrices (CSR/LIL) representing user-item interactions.
-4. **Pandas/NumPy**: For data loading, manipulation, and computation.
+## Modules
+
+| Path | Responsibility |
+|---|---|
+| `src/data/load_data.py` | Streaming gzip JSONL readers; tolerate truncated archives |
+| `src/data/preprocess.py` | Dedupe, binarize, iterative k-core filter, CSR matrix building |
+| `src/data/cache.py` | Config-keyed Parquet cache |
+| `src/models/als.py` | `implicit` ALS wrapper: train, batch-recommend, persist |
+| `src/models/popularity.py` | Popularity baseline and cold-start floor |
+| `src/models/content.py` | TF-IDF item-item similarity; cold-start profiles |
+| `src/eval/metrics.py` | Precision@K, Recall@K, NDCG@K, MAP@K |
+| `src/eval/split.py` | Seeded random split and temporal leave-last-out |
+| `src/eval/evaluate.py` | Batched evaluation over a shared user set |
+| `src/utils/helpers.py` | Config loading, path resolution, logging, plotting |
+
+## Conventions
+
+- **Paths**: every relative path resolves against `PROJECT_ROOT` via
+  `resolve_path()` in `src/utils/helpers.py`. Nothing depends on the CWD.
+- **Config**: no hyperparameter is hardcoded; everything lives in
+  `src/config/config.yaml`.
+- **Determinism**: one `seed` drives the split, user sampling and ALS
+  initialisation. Two runs produce byte-identical metrics.
+- **Index space**: the ALS model's factors are only meaningful against the
+  `user_map` / `item_map` it was trained with. Anything rebuilding an
+  interaction matrix for serving must pass those maps into
+  `create_interaction_matrix`.
+- **Caching**: cache keys hash the config values that produced the frame, so
+  changing `config.yaml` invalidates automatically.
+
+## Core technologies
+
+Python 3.12 · `implicit` (ALS) · SciPy sparse · pandas / NumPy ·
+scikit-learn (TF-IDF) · PyArrow (Parquet cache) · Streamlit · pytest
+
+## Known constraints
+
+- Both raw archives are truncated downloads; see README > Data integrity.
+  Metadata resolves titles for 36,311 of 51,064 items.
+- macOS is the only supported platform; `implicit` requires `libomp`.
