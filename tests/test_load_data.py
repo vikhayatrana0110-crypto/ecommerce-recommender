@@ -17,6 +17,13 @@ def write_jsonl_gz(path, records):
     return path
 
 
+def write_jsonl(path, records):
+    with open(path, "w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record) + "\n")
+    return path
+
+
 def review(user, asin, rating=5.0, ts=1):
     return {
         "user_id": user, "parent_asin": asin, "rating": rating, "timestamp": ts,
@@ -123,3 +130,17 @@ def test_load_metadata_returns_empty_frame_when_nothing_requested(tmp_path):
     df = load_metadata(path, filter_items=[])
     assert df.empty
     assert "item_id" in df.columns
+
+
+def test_load_reviews_reads_plain_jsonl(tmp_path):
+    """Uncompressed archives are accepted too, not just .jsonl.gz."""
+    path = write_jsonl(tmp_path / "r.jsonl", [review("U1", "A"), review("U2", "B")])
+    df = load_reviews(path)
+    assert len(df) == 2
+    assert list(df.columns) == ["user_id", "item_id", "rating", "timestamp"]
+
+
+def test_load_metadata_reads_plain_jsonl(tmp_path):
+    path = write_jsonl(tmp_path / "m.jsonl", [meta("A"), meta("B")])
+    df = load_metadata(path, filter_items=["A"])
+    assert set(df["item_id"]) == {"A"}

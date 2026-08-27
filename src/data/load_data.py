@@ -1,7 +1,8 @@
-"""Streaming readers for the gzip-compressed Amazon Reviews 2023 archives.
+"""Streaming readers for the Amazon Reviews 2023 archives.
 
-Both files are far larger than memory (reviews ~6 GB, metadata ~1.2 GB) and
-carry heavy nested fields we never use (`text`, `images`, `description`).
+Both plain `.jsonl` and gzip-compressed `.jsonl.gz` are accepted. The files
+are far larger than memory and carry heavy nested fields we never use
+(`text`, `images`, `description`).
 Parsing line by line and keeping only the needed keys avoids materialising
 those columns at all, and lets a malformed record be skipped rather than
 aborting a multi-gigabyte read.
@@ -36,8 +37,10 @@ def _stream_records(file_path, fields, log_every=1000000):
     line_no = 0
     truncated = None
 
+    opener = gzip.open if file_path.suffix == ".gz" else open
+
     try:
-        with gzip.open(file_path, "rt", encoding="utf-8", errors="replace") as fh:
+        with opener(file_path, "rt", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line_no += 1
                 try:
