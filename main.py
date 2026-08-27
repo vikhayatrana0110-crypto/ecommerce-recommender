@@ -1,122 +1,149 @@
-import os
+"""Trains the ALS recommender, benchmarks it, and persists the artifacts."""
 import numpy as np
-import pandas as pd
-from scipy.sparse import csr_matrix
-from implicit.als import AlternatingLeastSquares
 
-from src.data.load_data import load_reviews, load_metadata
-from src.data.preprocess import clean_reviews, filter_active_users, filter_popular_items, create_interaction_matrix
-from src.utils.helpers import load_config, save_pickle, load_pickle
+from src.eval.evaluate import eligible_users, evaluate_model, format_results_table
+from src.eval.split import build_split, random_split
+from src.models.als import ALSRecommender
+from src.models.content import ContentRecommender, cold_start_recommend
+from src.models.popularity import PopularityRecommender
+from src.pipeline import prepare, save_matrix, title_lookup
+from src.utils.helpers import get_logger, load_config, plot_metrics, resolve_path, save_pickle
 
-def train_test_split(interaction_matrix, test_ratio=0.2):
-    """Splits interaction matrix into training and testing matrices by masking test items."""
-    train = interaction_matrix.copy().tolil()
-    test = csr_matrix(interaction_matrix.shape).tolil()
-    
-    for user in range(interaction_matrix.shape[0]):
-        start, end = interaction_matrix.indptr[user], interaction_matrix.indptr[user + 1]
-        item_indices = interaction_matrix.indices[start:end]
-        
-        if len(item_indices) >= 2:
-            test_size = max(1, int(len(item_indices) * test_ratio))
-            test_items = np.random.choice(item_indices, size=test_size, replace=False)
-            train[user, test_items] = 0
-            test[user, test_items] = interaction_matrix[user, test_items]
-            
-    return train.tocsr(), test.tocsr()
+logger = get_logger(__name__)
 
-def evaluate_recommender(test_matrix, train_matrix, recommend_fn, k=10, max_users=2000):
-    """Evaluates recall and precision metrics consistently across models."""
-    precisions, recalls = [], []
-    num_users = min(test_matrix.shape[0], max_users)
-    
-    for user_id in range(num_users):
-        test_items = test_matrix[user_id].indices
-        if len(test_items) == 0:
-            continue
-        
-        # Call model-specific recommendation function
-        recommended = recommend_fn(user_id, train_matrix[user_id])
-        hits = len(set(recommended) & set(test_items))
-        
-        precisions.append(hits / k)
-        recalls.append(hits / len(test_items))
-        
-    return np.mean(precisions) if precisions else 0.0, np.mean(recalls) if recalls else 0.0
+# Kept at module level: tests/test_recommender.py imports this name.
+train_test_split = random_split
+
+
+class HybridRecommender:
+    """ALS for known users, content/popularity cold start for cold ones.
+
+    A user with no training history has no ALS embedding worth trusting, so
+    routing them to the content profile is strictly better than serving noise.
+    """
+
+    def __init__(self, als, content, popularity):
+        self.als = als
+        self.content = content
+        self.popularity = popularity
+        self._cold_users = 0
+
+    def recommend_batch(self, user_ids, train_matrix, n=10):
+        user_ids = np.asarray(user_ids)
+        # One vectorised pass instead of slicing a sparse row per user.
+        history = np.diff(train_matrix.indptr)[user_ids]
+        warm_mask = history > 0
+
+        results = [None] * len(user_ids)
+
+        warm = user_ids[warm_mask]
+        if len(warm):
+            warm_recs = self.als.recommend_batch(warm, train_matrix, n=n)
+            for pos, rec in zip(np.flatnonzero(warm_mask), warm_recs):
+                results[pos] = rec
+
+        for pos in np.flatnonzero(~warm_mask):
+            user = user_ids[pos]
+            results[pos] = cold_start_recommend(
+                self.content, self.popularity, train_matrix[user].indices, n=n
+            )
+
+        return results
+
+    @property
+    def cold_user_count(self):
+        return self._cold_users
 
 def main():
-    # 1. Initialization and configuration loading
     cfg = load_config()
-    os.makedirs(os.path.dirname(cfg['output']['model_path']), exist_ok=True)
-    
-    print("Loading data...")
-    reviews = load_reviews(cfg['data']['reviews_path'], cfg['data']['max_records'])
-    
-    # 2. Filtering and Preprocessing
-    print("Preprocessing dataset...")
-    reviews = clean_reviews(reviews)
-    reviews = filter_active_users(reviews, cfg['filtering']['min_reviews_user'])
-    reviews = filter_popular_items(reviews, cfg['filtering']['min_reviews_item'])
-    
-    # Dynamically resolve metadata only for active products in the interaction matrix
-    print("Loading metadata...")
-    active_item_ids = reviews['item_id'].unique()
-    metadata = load_metadata(cfg['data']['metadata_path'], filter_items=active_item_ids)
-    
-    interaction_matrix, user_map, item_map = create_interaction_matrix(reviews)
-    train_matrix, test_matrix = train_test_split(interaction_matrix)
-    
-    # 3. Model Training (implicit ALS)
-    print("Training ALS model...")
-    confidence_matrix = (train_matrix * cfg['als']['alpha']).astype("double")
-    model = AlternatingLeastSquares(
-        factors=cfg['als']['factors'],
-        regularization=cfg['als']['regularization'],
-        iterations=cfg['als']['iterations'],
-        use_gpu=False
-    )
-    model.fit(confidence_matrix)
-    
-    # Save model and mappings
-    save_pickle(model, cfg['output']['model_path'])
-    save_pickle(user_map, cfg['output']['user_map_path'])
-    save_pickle(item_map, cfg['output']['item_map_path'])
-    print(f"Model saved successfully to {cfg['output']['model_path']}")
-    
-    # 4. Consistent Evaluation
-    # ALS Recommendations fn
-    def recommend_als(user_id, user_items):
-        recs, _ = model.recommend(user_id, user_items=user_items, N=10, filter_already_liked_items=True)
-        return recs
-        
-    # Popularity Baseline fn
-    item_popularity = np.array(train_matrix.sum(axis=0)).flatten()
-    top_k_popular = np.argsort(-item_popularity)[:10]
-    def recommend_pop(user_id, user_items):
-        return top_k_popular
+    logger_level = cfg.get("logging", {}).get("level", "INFO")
+    logger.setLevel(logger_level)
+    seed = cfg.get("seed")
+    k = cfg["eval"]["k"]
 
-    als_p, als_r = evaluate_recommender(test_matrix, train_matrix, recommend_als)
-    pop_p, pop_r = evaluate_recommender(test_matrix, train_matrix, recommend_pop)
-    
-    print(f"\nALS Precision@10: {als_p:.4f} | Recall@10: {als_r:.4f}")
-    print(f"Popularity Precision@10: {pop_p:.4f} | Recall@10: {pop_r:.4f}")
-    
-    # 5. Metadata Integration Showcase (Recommendation Demo)
-    # Create product map from metadata DataFrame
-    meta_dict = metadata.set_index('item_id')['title'].to_dict()
-    # Reverse maps to translate indices back to IDs
+    logger.info("Preparing data...")
+    reviews, matrix, user_map, item_map, metadata = prepare(cfg)
+
+    cells = matrix.shape[0] * matrix.shape[1]
+    if cells == 0:
+        raise SystemExit(
+            "Filtering left no interactions. Lower filtering.min_reviews_user / "
+            "min_reviews_item, or raise data.max_records, in src/config/config.yaml."
+        )
+    logger.info(
+        "Interaction matrix: %s users x %s items, %s non-zeros (density %.4f)",
+        f"{matrix.shape[0]:,}", f"{matrix.shape[1]:,}", f"{matrix.nnz:,}",
+        matrix.nnz / cells,
+    )
+
+    strategy = cfg["split"]["strategy"]
+    logger.info("Splitting (%s)...", strategy)
+    train_matrix, test_matrix = build_split(reviews, matrix, user_map, item_map, cfg)
+
+    # Models
+    als = ALSRecommender(
+        factors=cfg["als"]["factors"],
+        regularization=cfg["als"]["regularization"],
+        iterations=cfg["als"]["iterations"],
+        alpha=cfg["als"]["alpha"],
+        seed=seed,
+    ).fit(train_matrix)
+
+    popularity = PopularityRecommender().fit(train_matrix)
+    content = ContentRecommender().fit(metadata, item_map)
+    hybrid = HybridRecommender(als, content, popularity)
+
+    # Persist artifacts
+    als.save(cfg["output"]["model_path"])
+    save_pickle(user_map, cfg["output"]["user_map_path"])
+    save_pickle(item_map, cfg["output"]["item_map_path"])
+    save_matrix(matrix, cfg["output"]["matrix_path"])
+    logger.info("Artifacts saved to %s", resolve_path(cfg["output"]["model_path"]).parent)
+
+    # Evaluation — every model scored on the identical user set.
+    users = eligible_users(test_matrix, cfg["eval"].get("max_users"), seed=seed)
+    logger.info("Evaluating %s users with held-out items", f"{len(users):,}")
+
+    cold = int((np.diff(train_matrix.indptr)[users] == 0).sum())
+    logger.info(
+        "%s of %s evaluated users have no training history (cold)",
+        f"{cold:,}", f"{len(users):,}",
+    )
+
+    results = {}
+    for name, model in (
+        ("ALS", als), ("Popularity", popularity), ("Hybrid", hybrid),
+    ):
+        scores = evaluate_model(name, model, users, train_matrix, test_matrix, k=k)
+        if scores:
+            results[name] = scores
+
+    if cold == 0:
+        logger.info(
+            "Hybrid matches ALS here by construction: leave-last-out never "
+            "produces a cold user. Its cold-start path is exercised by the app."
+        )
+
+    print(f"\nRanking performance ({strategy} split, k={k}, {len(users):,} users)\n")
+    print(format_results_table(results))
+
+    chart = plot_metrics(results, resolve_path(cfg["output"]["reports_dir"]) / "metrics.png")
+    if chart:
+        logger.info("Metrics chart written to %s", chart)
+
+    # Demo: readable recommendations for one user.
+    titles = title_lookup(metadata)
     inv_user_map = {v: k for k, v in user_map.items()}
     inv_item_map = {v: k for k, v in item_map.items()}
-    
-    demo_user = 0
-    raw_user_id = inv_user_map[demo_user]
-    recommended_indices = recommend_als(demo_user, train_matrix[demo_user])
-    
-    print(f"\nRecommendations for User: {raw_user_id}")
-    for idx, item_idx in enumerate(recommended_indices):
-        asin = inv_item_map[item_idx]
-        title = meta_dict.get(asin, "Unknown Product")
-        print(f"  {idx+1}. {title} (ASIN: {asin})")
+
+    if len(users):
+        demo = int(users[0])
+        recs = als.recommend_batch([demo], train_matrix, n=k)[0]
+        print(f"\nSample recommendations for user {inv_user_map[demo]}:")
+        for rank, item_idx in enumerate(recs, start=1):
+            asin = inv_item_map[int(item_idx)]
+            print(f"  {rank:2}. {titles.get(asin, 'Unknown Product')}  ({asin})")
+
 
 if __name__ == "__main__":
     main()
