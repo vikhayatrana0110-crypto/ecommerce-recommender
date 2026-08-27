@@ -48,7 +48,7 @@ gzip-compressed JSONL, not tracked by git).
 | **After 5-core filtering** | **1,003,531** | **94,249** | **51,064** | **10.65** |
 
 Final matrix: 94,249 × 51,064, density 0.0209%. Product titles resolve for
-36,311 of 51,064 items (see [Data integrity](#data-integrity)).
+36,326 of 51,064 items (see [Data integrity](#data-integrity)).
 
 ### Pipeline
 1. Stream reviews line-by-line, keeping only `user_id`, `parent_asin`, `rating`, `timestamp`
@@ -75,10 +75,42 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Place the raw archives at `data/raw/Electronics.jsonl.gz` and
-`data/raw/meta_Electronics.jsonl.gz`. They are available from the
+### Getting the data
+
+The raw archives are gitignored because of their size, so a fresh clone needs
+them downloaded once. They come from the
 [Amazon Reviews 2023 dataset](https://amazon-reviews-2023.github.io/)
-(McAuley Lab, UCSD) and are gitignored because of their size.
+(McAuley Lab, UCSD), hosted on Hugging Face:
+
+```bash
+mkdir -p data/raw
+
+# Reviews — 22.6 GB uncompressed
+curl -L -C - -o data/raw/Electronics.jsonl \
+  https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/review_categories/Electronics.jsonl
+
+# Product metadata — 5.2 GB uncompressed
+curl -L -C - -o data/raw/meta_Electronics.jsonl \
+  https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/meta_categories/meta_Electronics.jsonl
+```
+
+These are large files on a slow endpoint — expect hours, not minutes. The server
+supports range requests, and `curl -C -` resumes, so rerun the same command if a
+transfer drops rather than starting over.
+
+Then point [`src/config/config.yaml`](src/config/config.yaml) at whichever files
+you have:
+
+```yaml
+data:
+  reviews_path: "data/raw/Electronics.jsonl"
+  metadata_path: "data/raw/meta_Electronics.jsonl"
+```
+
+Both plain `.jsonl` and gzip-compressed `.jsonl.gz` are accepted, so there is no
+need to compress the downloads. The loaders stream line by line and stop at
+`data.max_records` (3M by default), so the reviews file is never read in full —
+only the metadata file is scanned deeply, to resolve product titles.
 
 ---
 
@@ -181,20 +213,25 @@ reaches 0.0243 — roughly **124× random**.
 
 ## Data integrity
 
-**Both raw archives in this project are truncated downloads.** `gzip -t` fails on
-each. The readers detect this and stop cleanly at the damage rather than
-crashing, so the pipeline runs on the recoverable prefix:
+The results above were produced from **truncated copies** of both archives —
+`gzip -t` failed on each. This is a property of those particular downloads, not
+of the dataset: files fetched with the commands in
+[Getting the data](#getting-the-data) are intact.
+
+The readers are built to survive it regardless. They detect a corrupt region and
+stop cleanly at the damage instead of crashing, so the pipeline runs on whatever
+prefix is readable:
 
 | Archive | Recoverable | Failure |
 |---|---|---|
 | `Electronics.jsonl.gz` | 36.3M reviews (clean well past 4M) | `invalid block type` near the end |
 | `meta_Electronics.jsonl.gz` | ~844,529 records | degrades into one repeating record, then hits EOF |
 
-The reviews file is unaffected in practice — the pipeline reads 3M records from
-a clean prefix. The metadata damage is why only 36,311 of 51,064 items resolve a
-title; the rest render as "Unknown Product". `data.metadata_max_lines` stops the
-scan before the corrupt region. **Re-downloading both archives would restore full
-title coverage**; no code change is needed.
+The reviews file was unaffected in practice, since the pipeline reads 3M records
+from a clean prefix. The metadata damage is why only 36,326 of 51,064 items
+resolve a title; the rest render as "Unknown Product". **A clean metadata file
+raises that coverage with no code change** — the reviews file does not need
+re-downloading for the default 3M-record configuration.
 
 ---
 

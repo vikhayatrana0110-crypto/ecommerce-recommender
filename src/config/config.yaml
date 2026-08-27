@@ -7,10 +7,10 @@ data:
   # Reviews to stream from the 6 GB archive. Raise for a denser matrix.
   max_records: 3000000
   chunk_size: 250000
-  # Both raw archives are truncated downloads (see README > Data integrity).
-  # Reviews are clean well past 4M lines; the metadata stream degrades into a
-  # repeating record at line ~844,530, so we stop before it.
-  metadata_max_lines: 844000
+  # Safety budget: the metadata scan stops early once every needed item is
+  # resolved, so this only bounds the worst case. Lower it to 844000 if you are
+  # using the truncated archive described in README > Data integrity.
+  metadata_max_lines: 2000000
 
 filtering:
   min_reviews_user: 5

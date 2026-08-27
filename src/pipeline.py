@@ -65,6 +65,7 @@ def build_metadata(cfg, item_ids, use_cache=True):
     item_ids = sorted(map(str, item_ids))
     key_parts = [
         source_fingerprint(data_cfg["metadata_path"]),
+        data_cfg.get("metadata_max_lines"),
         len(item_ids), item_ids[:50], item_ids[-50:],
     ]
 
